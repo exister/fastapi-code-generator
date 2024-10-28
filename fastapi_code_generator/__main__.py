@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import typer
 from datamodel_code_generator import DataModelType, LiteralType, PythonVersion, chdir
-from datamodel_code_generator.format import CodeFormatter
+from datamodel_code_generator.format import CodeFormatter, DatetimeClassType
 from datamodel_code_generator.imports import Import, Imports
 from datamodel_code_generator.model import get_data_model_types
 from datamodel_code_generator.reference import Reference
@@ -52,7 +52,9 @@ def main(
     enum_field_as_literal: Optional[LiteralType] = typer.Option(
         None, "--enum-field-as-literal"
     ),
+    field_constraints: bool = typer.Option(False, "--field-constraints"),
     generate_routers: bool = typer.Option(False, "--generate-routers", "-r"),
+    set_default_enum_member: bool = typer.Option(False, "--set-default-enum-member"),
     specify_tags: Optional[str] = typer.Option(None, "--specify-tags"),
     custom_visitors: Optional[List[Path]] = typer.Option(
         None, "--custom-visitor", "-c"
@@ -64,6 +66,16 @@ def main(
     python_version: PythonVersion = typer.Option(
         PythonVersion.PY_38.value, "--python-version", "-p"
     ),
+    use_annotated: bool = typer.Option(False, "--use-annotated"),
+    use_standard_collections: bool = typer.Option(False, "--use-standard-collections"),
+    use_non_positive_negative_number_constrained_types: bool = typer.Option(
+        False, "--use-non-positive-negative-number-constrained-types"
+    ),
+    use_double_quotes: bool = typer.Option(False, "--use-double-quotes"),
+    use_union_operator: bool = typer.Option(False, "--use-union-operator"),
+    use_schema_description: bool = typer.Option(False, "--use-schema-description"),
+    reuse_model: bool = typer.Option(False, "--reuse-model"),
+    no_format_code: bool = typer.Option(False, "--no-format-code"),
 ) -> None:
     input_name: str = input_file
     input_text: str
@@ -84,12 +96,22 @@ def main(
         template_dir,
         model_path,
         enum_field_as_literal=enum_field_as_literal or None,
+        field_constraints=field_constraints,
         custom_visitors=custom_visitors,
         disable_timestamp=disable_timestamp,
         generate_routers=generate_routers,
+        set_default_enum_member=set_default_enum_member,
         specify_tags=specify_tags,
         output_model_type=output_model_type,
         python_version=python_version,
+        use_annotated=use_annotated,
+        use_standard_collections=use_standard_collections,
+        use_non_positive_negative_number_constrained_types=use_non_positive_negative_number_constrained_types,
+        use_double_quotes=use_double_quotes,
+        use_union_operator=use_union_operator,
+        use_schema_description=use_schema_description,
+        reuse_model=reuse_model,
+        format_code=not no_format_code,
     )
 
 
@@ -111,12 +133,23 @@ def generate_code(
     template_dir: Optional[Path],
     model_path: Optional[Path] = None,
     enum_field_as_literal: Optional[LiteralType] = None,
+    field_constraints: bool = False,
     custom_visitors: Optional[List[Path]] = None,
     disable_timestamp: bool = False,
     generate_routers: Optional[bool] = None,
+    set_default_enum_member: bool = False,
     specify_tags: Optional[str] = None,
     output_model_type: DataModelType = DataModelType.PydanticBaseModel,
     python_version: PythonVersion = PythonVersion.PY_38,
+    target_datetime_class: DatetimeClassType = DatetimeClassType.Datetime,
+    use_annotated: bool = False,
+    use_standard_collections: bool = False,
+    use_non_positive_negative_number_constrained_types: bool = False,
+    use_double_quotes: bool = False,
+    use_union_operator: bool = False,
+    use_schema_description: bool = False,
+    reuse_model: bool = False,
+    format_code: bool = True,
 ) -> None:
     if not model_path:
         model_path = MODEL_PATH
@@ -130,16 +163,27 @@ def generate_code(
         )
     if not custom_visitors:
         custom_visitors = []
-    data_model_types = get_data_model_types(output_model_type, python_version)
+    data_model_types = get_data_model_types(
+        output_model_type, python_version, target_datetime_class
+    )
 
     parser = OpenAPIParser(
         input_text,
         enum_field_as_literal=enum_field_as_literal,
+        field_constraints=field_constraints,
         data_model_type=data_model_types.data_model,
         data_model_root_type=data_model_types.root_model,
         data_model_field_type=data_model_types.field_model,
         data_type_manager_type=data_model_types.data_type_manager,
         dump_resolve_reference_action=data_model_types.dump_resolve_reference_action,
+        set_default_enum_member=set_default_enum_member,
+        use_annotated=use_annotated,
+        use_standard_collections=use_standard_collections,
+        use_non_positive_negative_number_constrained_types=use_non_positive_negative_number_constrained_types,
+        use_double_quotes=use_double_quotes,
+        use_union_operator=use_union_operator,
+        use_schema_description=use_schema_description,
+        reuse_model=reuse_model,
     )
 
     with chdir(output_dir):
@@ -190,7 +234,10 @@ def generate_code(
     # Convert from Tag Names to router_names
     sorted_tags = sorted(set(all_tags), key=lambda x: x.lower())
     routers = sorted(
-        [re.sub(TITLE_PATTERN, '_', tag.strip()).lower() for tag in sorted_tags]
+        [
+            re.sub(TITLE_PATTERN, '_', tag.strip()).replace('-', '_').lower()
+            for tag in sorted_tags
+        ]
     )
     template_vars = {**template_vars, "routers": routers, "tags": sorted_tags}
 
@@ -198,7 +245,9 @@ def generate_code(
         relative_path = target.relative_to(template_dir)
         template = environment.get_template(str(relative_path))
         result = template.render(template_vars)
-        results[relative_path] = code_formatter.format_code(result)
+        results[relative_path] = (
+            code_formatter.format_code(result) if format_code else result
+        )
 
     if generate_routers:
         tags = sorted_tags
@@ -225,7 +274,9 @@ def generate_code(
                     template = environment.get_template(str(relative_path))
                     result = template.render(template_vars)
                     router_path = Path("routers", router).with_suffix(".jinja2")
-                    results[router_path] = code_formatter.format_code(result)
+                    results[router_path] = (
+                        code_formatter.format_code(result) if format_code else result
+                    )
 
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     header = f"""\

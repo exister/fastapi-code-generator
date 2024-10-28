@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+from functools import cached_property
 from typing import (
     Any,
     Callable,
@@ -42,7 +43,6 @@ from datamodel_code_generator.parser.openapi import (
     ResponseObject,
 )
 from datamodel_code_generator.types import DataType, DataTypeManager, StrictTypes
-from datamodel_code_generator.util import cached_property
 from pydantic import BaseModel, ValidationInfo
 
 RE_APPLICATION_JSON_PATTERN: Pattern[str] = re.compile(r'^application/.*json$')
@@ -51,7 +51,7 @@ RE_APPLICATION_JSON_PATTERN: Pattern[str] = re.compile(r'^application/.*json$')
 class CachedPropertyModel(BaseModel):
     class Config:
         arbitrary_types_allowed = True
-        keep_untouched = (cached_property,)
+        ignored_types = (cached_property,)
 
 
 class Response(BaseModel):
@@ -194,6 +194,10 @@ class OpenAPIParser(OpenAPIModelParser):
         custom_class_name_generator: Optional[Callable[[str], str]] = None,
         field_extra_keys: Optional[Set[str]] = None,
         field_include_all_keys: bool = False,
+        use_annotated: bool = False,
+        use_non_positive_negative_number_constrained_types: bool = False,
+        use_double_quotes: bool = False,
+        use_union_operator: bool = False,
     ):
         super().__init__(
             source=source,
@@ -233,6 +237,10 @@ class OpenAPIParser(OpenAPIModelParser):
             field_extra_keys=field_extra_keys,
             field_include_all_keys=field_include_all_keys,
             openapi_scopes=[OpenAPIScope.Schemas, OpenAPIScope.Paths],
+            use_annotated=use_annotated,
+            use_non_positive_negative_number_constrained_types=use_non_positive_negative_number_constrained_types,
+            use_union_operator=use_union_operator,
+            use_double_quotes=use_double_quotes,
         )
         self.operations: Dict[str, Operation] = {}
         self._temporary_operation: Dict[str, Any] = {}
